@@ -125,12 +125,50 @@ function saveState() {
 }
 
 // ============ GITHUB CLOUD SYNC (GIST API) ============
+// ============ GITHUB CLOUD SYNC (GIST API) ============
 async function syncToCloud() {
-  const { githubToken, gistId } = state.cloudConfig || {};
-  if (!githubToken || !gistId) return;
+  const tokenInput = document.getElementById('settCloudToken')?.value.trim();
+  const gistIdInput = document.getElementById('settCloudGistId')?.value.trim();
+
+  // Обновляем токен и Gist ID из полей ввода, если они переданы
+  if (!state.cloudConfig) state.cloudConfig = {};
+  if (tokenInput) state.cloudConfig.githubToken = tokenInput;
+  if (gistIdInput) state.cloudConfig.gistId = gistIdInput;
+
+  const { githubToken, gistId } = state.cloudConfig;
+
+  if (!githubToken) {
+    showToast('Введите GitHub Personal Access Token', 'error');
+    return;
+  }
+
+  // Если Gist ID нет (например, на новом устройстве) — ищем существующее облако на GitHub
+  if (!gistId) {
+    console.log('[Storage:Cloud] 🔍 Gist ID не найден. Поиск существующего хранилища в аккаунте GitHub...');
+    showToast('Поиск вашего облака на GitHub...', 'success');
+    const foundId = await autoDiscoverGist(githubToken);
+    if (foundId) {
+      state.cloudConfig.gistId = foundId;
+      await loadFromCloud();
+      saveState();
+      renderSettingsContent();
+      render();
+      showToast('Успешно подключено к вашему облаку!', 'success');
+      return;
+    } else {
+      showToast('Облако не найдено. Нажмите "Создать облако"', 'error');
+      renderCloudStatusBox('Облако не найдено в аккаунте. Создайте новое кнопкой ниже.');
+      return;
+    }
+  }
 
   console.log(`[Storage:Cloud] 🚀 Начало отправки данных в GitHub Gist (ID: ${gistId})...`);
+  showToast('Синхронизация с GitHub...', 'success');
+
   try {
+    // Сначала пробуем загрузить свежие данные с облака
+    await loadFromCloud();
+
     const payload = {
       description: "Progress Tracker Backup Data",
       files: {
@@ -156,16 +194,44 @@ async function syncToCloud() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       console.log(`[Storage:Cloud] ✅ Успешно синхронизировано с GitHub Gist (Status ${response.status} OK). Время: ${formatDateTime(state.cloudConfig.lastSyncedAt)}`);
       renderCloudStatusBox();
+      showToast('Синхронизировано с GitHub!', 'success');
     } else {
       const errText = await response.text();
       console.error(`[Storage:Cloud] ❌ Ошибка Gist API (${response.status}):`, errText);
       renderCloudStatusBox(`Ошибка ${response.status}: Проверьте токен или Gist ID`);
+      showToast(`Ошибка ${response.status}: неверный токен`, 'error');
     }
   } catch (e) {
     console.error('[Storage:Cloud] ❌ Сетевая ошибка при синхронизации с облаком:', e);
     state.cloudConfig.pendingSync = true;
     renderCloudStatusBox('Ошибка сети. Данные сохранены локально.');
+    showToast('Ошибка сети при синхронизации', 'error');
   }
+}
+
+async function autoDiscoverGist(token) {
+  try {
+    const response = await fetch('https://api.github.com/gists', {
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': `Bearer ${token.trim()}`
+      }
+    });
+
+    if (response.ok) {
+      const gists = await response.json();
+      const trackerGist = gists.find(g => g.files && g.files['progress_tracker_state.json']);
+      if (trackerGist) {
+        console.log(`[Storage:Cloud] 🎉 Найдено существующее облако! Gist ID: ${trackerGist.id}`);
+        return trackerGist.id;
+      }
+    } else {
+      console.warn(`[Storage:Cloud] ⚠️ Ошибка поиска Gists (Status ${response.status})`);
+    }
+  } catch (e) {
+    console.error('[Storage:Cloud] ❌ Ошибка сети при поиске Gist:', e);
+  }
+  return null;
 }
 
 async function createCloudGist() {
@@ -174,6 +240,20 @@ async function createCloudGist() {
 
   if (!token) {
     showToast('Введите GitHub Personal Access Token', 'error');
+    return;
+  }
+
+  // Сначала проверяем, вдруг облако уже существует в этом аккаунте
+  const existingId = await autoDiscoverGist(token);
+  if (existingId) {
+    if (!state.cloudConfig) state.cloudConfig = {};
+    state.cloudConfig.githubToken = token;
+    state.cloudConfig.gistId = existingId;
+    await loadFromCloud();
+    saveState();
+    renderSettingsContent();
+    render();
+    showToast('Найдено существующее облако! Данные загружены.', 'success');
     return;
   }
 
