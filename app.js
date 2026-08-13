@@ -178,14 +178,24 @@ async function syncToCloud() {
   _isSyncing = true;
 
   try {
+    if (!state.cloudConfig) state.cloudConfig = {};
 
-  if (!state.cloudConfig) state.cloudConfig = {};
-  const { githubToken, gistId } = state.cloudConfig;
+    // Считываем токен и Gist ID прямо из полей ввода, если панель настроек открыта
+    const tokenInput = document.getElementById('settCloudToken');
+    const gistInput = document.getElementById('settCloudGistId');
+    if (tokenInput && tokenInput.value.trim()) {
+      state.cloudConfig.githubToken = tokenInput.value.trim();
+    }
+    if (gistInput && gistInput.value.trim()) {
+      state.cloudConfig.gistId = gistInput.value.trim();
+    }
 
-  if (!githubToken) {
-    showToast('Введите GitHub Personal Access Token', 'error');
-    return;
-  }
+    const { githubToken, gistId } = state.cloudConfig;
+
+    if (!githubToken) {
+      showToast('Введите GitHub Personal Access Token', 'error');
+      return;
+    }
 
   // Если Gist ID нет (например, на новом устройстве) — ищем существующее облако на GitHub
   if (!gistId) {
