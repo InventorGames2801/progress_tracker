@@ -125,7 +125,14 @@ function saveState() {
 }
 
 // ============ GITHUB CLOUD SYNC (GIST API) ============
-// ============ GITHUB CLOUD SYNC (GIST API) ============
+function getAuthHeader(token) {
+  if (!token) return '';
+  const t = token.trim();
+  if (t.startsWith('token ') || t.startsWith('Bearer ')) return t;
+  if (t.startsWith('ghp_') || t.startsWith('gist_')) return `token ${t}`;
+  return `Bearer ${t}`;
+}
+
 async function syncToCloud() {
   const tokenInput = document.getElementById('settCloudToken')?.value.trim();
   const gistIdInput = document.getElementById('settCloudGistId')?.value.trim();
@@ -182,7 +189,7 @@ async function syncToCloud() {
       method: 'PATCH',
       headers: {
         'Accept': 'application/vnd.github+json',
-        'Authorization': `Bearer ${githubToken.trim()}`,
+        'Authorization': getAuthHeader(githubToken),
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
@@ -214,7 +221,7 @@ async function autoDiscoverGist(token) {
     const response = await fetch('https://api.github.com/gists', {
       headers: {
         'Accept': 'application/vnd.github+json',
-        'Authorization': `Bearer ${token.trim()}`
+        'Authorization': getAuthHeader(token)
       }
     });
 
@@ -275,7 +282,7 @@ async function createCloudGist() {
       method: 'POST',
       headers: {
         'Accept': 'application/vnd.github+json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': getAuthHeader(token),
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(payload)
@@ -314,7 +321,7 @@ async function loadFromCloud() {
     const response = await fetch(`https://api.github.com/gists/${gistId}`, {
       headers: {
         'Accept': 'application/vnd.github+json',
-        'Authorization': `Bearer ${githubToken.trim()}`
+        'Authorization': getAuthHeader(githubToken)
       }
     });
 
