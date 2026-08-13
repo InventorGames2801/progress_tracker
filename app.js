@@ -135,9 +135,17 @@ function getAuthHeader(token) {
 
 // Удаляем чувствительные данные перед отправкой в Gist
 function getSanitizedState() {
-  const safeState = JSON.parse(JSON.stringify(state));
+  let stateStr = JSON.stringify(state);
+  const token = state.cloudConfig && state.cloudConfig.githubToken;
+  
+  // Параноидальная защита: если токен случайно попал в логи, название цели или Gist ID, мы его вырежем отовсюду
+  if (token && token.trim().length > 10) {
+    stateStr = stateStr.split(token).join('***MASKED_TOKEN***');
+  }
+  
+  const safeState = JSON.parse(stateStr);
   if (safeState.cloudConfig) {
-    // Удаляем токен, чтобы GitHub Secret Scanning не отзывал его
+    // Удаляем само поле токена, чтобы GitHub Secret Scanning не отзывал его
     delete safeState.cloudConfig.githubToken;
   }
   return safeState;
