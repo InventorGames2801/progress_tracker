@@ -686,13 +686,27 @@ input[type="file"] {
 }
 
 .subgoal-card.completed {
-  background: linear-gradient(145deg, rgba(34, 197, 94, 0.08), rgba(20, 110, 50, 0.05));
-  border-color: rgba(34, 197, 94, 0.3);
-  box-shadow: 0 4px 15px rgba(34, 197, 94, 0.1);
+  background: linear-gradient(145deg, rgba(34, 197, 94, 0.14), rgba(20, 110, 50, 0.08));
+  border-color: rgba(34, 197, 94, 0.35);
+  box-shadow: 0 4px 15px rgba(34, 197, 94, 0.12);
 }
+
+.subgoals-grid:has(.subgoal-card.completed:hover) .subgoal-card.completed:not(:hover) {
+  background: rgba(34, 197, 94, 0.07);
+  border-color: rgba(34, 197, 94, 0.2);
+  opacity: 0.6;
+  transform: scale(0.98);
+}
+
 .subgoal-card.completed:hover {
-  box-shadow: 0 8px 25px rgba(34, 197, 94, 0.2);
+  background: #06150d;
+  border-color: #22c55e;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.75), 0 0 25px rgba(34, 197, 94, 0.4);
+  transform: translateY(-4px) scale(1.02);
+  opacity: 1 !important;
+  z-index: 2;
 }
+
 .subgoal-card.completed .subgoal-card-title {
   color: #34d399;
 }
@@ -726,21 +740,33 @@ input[type="file"] {
 
 /* --- Subgoal Card --- */
 .subgoal-card {
-  background: var(--bg-card);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  transition: var(--transition);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
+/* При наведении на сетку: остальные карточки остаются светлыми с лёгким приглушением */
+.subgoals-grid:has(.subgoal-card:hover) .subgoal-card:not(:hover) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+  opacity: 0.6;
+  transform: scale(0.98);
+}
+
+/* Наведённая карточка становится тёмной, контрастной, с подсветкой */
 .subgoal-card:hover {
-  background: var(--bg-card-hover);
-  border-color: var(--border-medium);
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-lg);
+  background: #090a18;
+  border-color: var(--accent-1);
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.75), 0 0 25px rgba(99, 102, 241, 0.35);
+  opacity: 1 !important;
+  z-index: 2;
 }
 
 .subgoal-card-image {
@@ -1165,15 +1191,25 @@ input[type="file"] {
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--radius-md);
   margin-bottom: 8px;
-  transition: var(--transition);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#settingsSubGoalsList:has(.settings-subgoal-item:hover) .settings-subgoal-item:not(:hover) {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  opacity: 0.6;
 }
 
 .settings-subgoal-item:hover {
-  background: var(--bg-card-hover);
+  background: #090a18;
+  border-color: var(--accent-1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), 0 0 15px rgba(99, 102, 241, 0.25);
+  transform: translateY(-1px);
+  opacity: 1 !important;
 }
 
 .settings-subgoal-name {
