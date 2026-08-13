@@ -20,6 +20,8 @@ function getDefaultState() {
     goalStartDate: '',
     subGoals: [],
     logs: [],
+    deletedSubGoalIds: [],
+    deletedLogIds: [],
     cloudConfig: {
       githubToken: '',
       gistId: '',
@@ -388,9 +390,14 @@ async function loadFromCloud() {
         const remoteState = JSON.parse(file.content);
         console.log('[Storage:Cloud] 📥 Получено удаленное состояние с GitHub');
 
-        // Merge-стратегия: объединяем логи по уникальным ID вместо полной перезаписи
+        // Merge-стратегия с поддержкой Tombstones (удаленных элементов)
+        const remoteDeletedLogIds = remoteState.deletedLogIds || [];
+        const remoteDeletedSubGoalIds = remoteState.deletedSubGoalIds || [];
+        const mergedDeletedLogIds = Array.from(new Set([...(state.deletedLogIds || []), ...remoteDeletedLogIds]));
+        const mergedDeletedSubGoalIds = Array.from(new Set([...(state.deletedSubGoalIds || []), ...remoteDeletedSubGoalIds]));
+
         const localLogIds = new Set(state.logs.map(l => l.id));
-        const mergedLogs = [...state.logs];
+        let mergedLogs = [...state.logs];
         if (remoteState.logs && Array.isArray(remoteState.logs)) {
           for (const remoteLog of remoteState.logs) {
             if (!localLogIds.has(remoteLog.id)) {
@@ -398,11 +405,14 @@ async function loadFromCloud() {
             }
           }
         }
+        
+        // Отфильтровываем все логи, которые были удалены хотя бы на одном устройстве
+        mergedLogs = mergedLogs.filter(log => !mergedDeletedLogIds.includes(log.id));
         mergedLogs.sort((a, b) => new Date(a.date) - new Date(b.date));
 
         // Merge подзадач по ID
         const localSGIds = new Set(state.subGoals.map(sg => sg.id));
-        const mergedSubGoals = [...state.subGoals];
+        let mergedSubGoals = [...state.subGoals];
         if (remoteState.subGoals && Array.isArray(remoteState.subGoals)) {
           for (const remoteSG of remoteState.subGoals) {
             if (!localSGIds.has(remoteSG.id)) {
@@ -410,6 +420,9 @@ async function loadFromCloud() {
             }
           }
         }
+        
+        // Отфильтровываем все подзадачи, которые были удалены хотя бы на одном устройстве
+        mergedSubGoals = mergedSubGoals.filter(sg => !mergedDeletedSubGoalIds.includes(sg.id));
 
         // Настройки цели: предпочитаем облачные значения (актуальнее)
         state = {
@@ -421,6 +434,8 @@ async function loadFromCloud() {
           goalStartDate: remoteState.goalStartDate || state.goalStartDate,
           subGoals: mergedSubGoals,
           logs: mergedLogs,
+          deletedSubGoalIds: mergedDeletedSubGoalIds,
+          deletedLogIds: mergedDeletedLogIds,
           goalCurrent: 0, // будет пересчитан ниже
           cloudConfig: { ...state.cloudConfig, lastSyncedAt: new Date().toISOString() }
         };
@@ -1299,6 +1314,8 @@ function deleteSubGoal(id) {
 
   if (!confirm(`Удалить подзадачу "${sg.title}"? Это действие нельзя отменить.`)) return;
 
+  if (!state.deletedSubGoalIds) state.deletedSubGoalIds = [];
+  state.deletedSubGoalIds.push(id);
   state.subGoals = state.subGoals.filter(s => s.id !== id);
   
   // Отвязываем логи удаленной подзадачи
@@ -1364,6 +1381,9 @@ function saveSettings() {
 function resetProgress() {
   if (!confirm('Вы уверены? Весь прогресс будет сброшен!')) return;
   if (!confirm('Это действие НЕЛЬЗЯ отменить. Продолжить?')) return;
+
+  if (!state.deletedLogIds) state.deletedLogIds = [];
+  state.logs.forEach(log => state.deletedLogIds.push(log.id));
 
   state.goalCurrent = 0;
   state.logs = [];
@@ -1598,9 +1618,10 @@ function deleteLog(id) {
   const log = state.logs.find(l => l.id === id);
   if (!log) return;
 
-  if (!confirm(`Удалить запись? Будет вычтено ${log.points} очков из прогресса.`)) return;
+  if (!confirm('Удалить эту запись?')) return;
 
-  // Удаляем лог
+  if (!state.deletedLogIds) state.deletedLogIds = [];
+  state.deletedLogIds.push(id);
   state.logs = state.logs.filter(l => l.id !== id);
   
   // Пересчитываем балансы (SSOT)
