@@ -19,9 +19,16 @@ function getDefaultState() {
     goalColor: '#6366f1',
     goalStartDate: '',
     subGoals: [],
-    logs: []
+    logs: [],
+    cloudConfig: {
+      githubToken: '',
+      gistId: '',
+      lastSyncedAt: null,
+      pendingSync: false
+    }
   };
 }
+
 
 // ============ STATE ============
 let state = getDefaultState();
@@ -75,31 +82,224 @@ function formatNumber(num) {
   return new Intl.NumberFormat('ru-RU').format(num);
 }
 
-// ============ LOCALSTORAGE ============
+// ============ LOCALSTORAGE & CLOUD SYNC ============
 function loadState() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      state = { ...getDefaultState(), ...parsed };
-      console.log('[Storage] Состояние загружено:', state);
+      state = { ...getDefaultState(), ...parsed, cloudConfig: { ...getDefaultState().cloudConfig, ...(parsed.cloudConfig || {}) } };
+      console.log('[Storage:Local] Состояние загружено из localStorage:', state);
     } else {
-      console.log('[Storage] Сохранённого состояния нет, используются значения по умолчанию');
+      console.log('[Storage:Local] Сохранённого состояния в localStorage нет, используются значения по умолчанию');
     }
   } catch (e) {
-    console.error('[Storage] Ошибка загрузки:', e);
+    console.error('[Storage:Local] Ошибка загрузки из localStorage:', e);
     state = getDefaultState();
+  }
+
+  // Загружаем с GitHub при наличии сетевого соединения и настроенного облака
+  if (state.cloudConfig && state.cloudConfig.githubToken && state.cloudConfig.gistId && navigator.onLine) {
+    loadFromCloud();
   }
 }
 
 function saveState() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    console.log('[Storage] Состояние сохранено');
+    console.log('[Storage:Local] Состояние сохранено в localStorage');
   } catch (e) {
-    console.error('[Storage] Ошибка сохранения:', e);
-    showToast('Ошибка сохранения данных', 'error');
+    console.error('[Storage:Local] Ошибка сохранения в localStorage:', e);
+    showToast('Ошибка сохранения локальных данных', 'error');
   }
+
+  // Если настроена синхронизация с GitHub Cloud
+  if (state.cloudConfig && state.cloudConfig.githubToken && state.cloudConfig.gistId) {
+    if (navigator.onLine) {
+      syncToCloud();
+    } else {
+      state.cloudConfig.pendingSync = true;
+      console.warn('[Storage:Offline] Нет интернет-соединения. Данные сохранены локально и будут отправлены при появлении сети.');
+    }
+  }
+}
+
+// ============ GITHUB CLOUD SYNC (GIST API) ============
+async function syncToCloud() {
+  const { githubToken, gistId } = state.cloudConfig || {};
+  if (!githubToken || !gistId) return;
+
+  console.log(`[Storage:Cloud] 🚀 Начало отправки данных в GitHub Gist (ID: ${gistId})...`);
+  try {
+    const payload = {
+      description: "Progress Tracker Backup Data",
+      files: {
+        "progress_tracker_state.json": {
+          content: JSON.stringify(state, null, 2)
+        }
+      }
+    };
+
+    const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+      method: 'PATCH',
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': `Bearer ${githubToken.trim()}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (response.ok) {
+      state.cloudConfig.lastSyncedAt = new Date().toISOString();
+      state.cloudConfig.pendingSync = false;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      console.log(`[Storage:Cloud] ✅ Успешно синхронизировано с GitHub Gist (Status ${response.status} OK). Время: ${formatDateTime(state.cloudConfig.lastSyncedAt)}`);
+      renderCloudStatusBox();
+    } else {
+      const errText = await response.text();
+      console.error(`[Storage:Cloud] ❌ Ошибка Gist API (${response.status}):`, errText);
+      renderCloudStatusBox(`Ошибка ${response.status}: Проверьте токен или Gist ID`);
+    }
+  } catch (e) {
+    console.error('[Storage:Cloud] ❌ Сетевая ошибка при синхронизации с облаком:', e);
+    state.cloudConfig.pendingSync = true;
+    renderCloudStatusBox('Ошибка сети. Данные сохранены локально.');
+  }
+}
+
+async function createCloudGist() {
+  const tokenInput = document.getElementById('settCloudToken');
+  const token = tokenInput ? tokenInput.value.trim() : '';
+
+  if (!token) {
+    showToast('Введите GitHub Personal Access Token', 'error');
+    return;
+  }
+
+  console.log('[Storage:Cloud] ⚙️ Запрос на создание нового секретного Gist на GitHub...');
+  showToast('Создание хранилища на GitHub...', 'success');
+
+  try {
+    const payload = {
+      description: "Progress Tracker Secret Backup",
+      public: false,
+      files: {
+        "progress_tracker_state.json": {
+          content: JSON.stringify(state, null, 2)
+        }
+      }
+    };
+
+    const response = await fetch('https://api.github.com/gists', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (!state.cloudConfig) state.cloudConfig = {};
+      state.cloudConfig.githubToken = token;
+      state.cloudConfig.gistId = data.id;
+      state.cloudConfig.lastSyncedAt = new Date().toISOString();
+      state.cloudConfig.pendingSync = false;
+
+      saveState();
+      renderSettingsContent();
+      render();
+      console.log(`[Storage:Cloud] 🎉 Секретный Gist успешно создан! Gist ID: ${data.id}`);
+      showToast('Облачное хранилище создано на GitHub!');
+    } else {
+      const errText = await response.text();
+      console.error(`[Storage:Cloud] ❌ Ошибка создания Gist (${response.status}):`, errText);
+      showToast(`Ошибка ${response.status}: Проверьте токен GitHub`, 'error');
+    }
+  } catch (e) {
+    console.error('[Storage:Cloud] ❌ Ошибка сети при создании Gist:', e);
+    showToast('Ошибка сети при подключении к GitHub', 'error');
+  }
+}
+
+async function loadFromCloud() {
+  const { githubToken, gistId } = state.cloudConfig || {};
+  if (!githubToken || !gistId || !navigator.onLine) return;
+
+  console.log(`[Storage:Cloud] 🔄 Проверка и загрузка актуального состояния с GitHub (Gist ID: ${gistId})...`);
+  try {
+    const response = await fetch(`https://api.github.com/gists/${gistId}`, {
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': `Bearer ${githubToken.trim()}`
+      }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const file = data.files && data.files['progress_tracker_state.json'];
+      if (file && file.content) {
+        const remoteState = JSON.parse(file.content);
+        console.log('[Storage:Cloud] 📥 Получено удаленное состояние с GitHub:', remoteState);
+
+        state = { ...getDefaultState(), ...remoteState, cloudConfig: { ...state.cloudConfig, lastSyncedAt: new Date().toISOString() } };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        render();
+        console.log('[Storage:Cloud] ✅ Данные успешно синхронизированы с GitHub!');
+      }
+    } else {
+      console.warn(`[Storage:Cloud] ⚠️ Не удалось загрузить облачные данные (Status ${response.status})`);
+    }
+  } catch (e) {
+    console.error('[Storage:Cloud] ❌ Ошибка при получении данных с GitHub:', e);
+  }
+}
+
+function renderCloudStatusBox(errorMessage = '') {
+  const box = document.getElementById('cloudStatusBox');
+  if (!box) return;
+
+  const { githubToken, gistId, lastSyncedAt, pendingSync } = state.cloudConfig || {};
+
+  if (!githubToken || !gistId) {
+    box.innerHTML = `
+      <div style="color: #fbbf24; font-weight: 500;">⚠️ Облачная синхронизация не настроена</div>
+      <div style="color: var(--text-muted); font-size: 0.78rem; margin-top: 4px;">
+        Введите Personal Access Token и нажмите "Создать облако на GitHub", чтобы начать безопасное хранение.
+      </div>
+    `;
+    return;
+  }
+
+  if (errorMessage) {
+    box.innerHTML = `
+      <div style="color: #f87171; font-weight: 500;">❌ Статус: Ошибка</div>
+      <div style="color: #fca5a5; font-size: 0.78rem; margin-top: 4px;">${escapeHtml(errorMessage)}</div>
+    `;
+    return;
+  }
+
+  if (!navigator.onLine) {
+    box.innerHTML = `
+      <div style="color: #fbbf24; font-weight: 500;">📡 Оффлайн-режим (Нет сети)</div>
+      <div style="color: var(--text-muted); font-size: 0.78rem; margin-top: 4px;">
+        Данные сохраняются локально. Синхронизация с GitHub произойдет при подключении к сети.
+      </div>
+    `;
+    return;
+  }
+
+  box.innerHTML = `
+    <div style="color: #34d399; font-weight: 500;">✅ Статус: Подключено к GitHub Gist</div>
+    <div style="color: var(--text-muted); font-size: 0.78rem; margin-top: 4px;">
+      Gist ID: <code style="font-family: monospace;">${escapeHtml(gistId)}</code><br>
+      Последняя синхронизация: ${lastSyncedAt ? formatDateTime(lastSyncedAt) : 'Только что'}<br>
+      ${pendingSync ? '<span style="color: #fbbf24;">Есть локальные изменения для отправки...</span>' : '<span style="color: #34d399;">Все данные синхронизированы</span>'}
+    </div>
+  `;
 }
 
 // ============ TOAST NOTIFICATIONS ============
@@ -558,6 +758,8 @@ function closeSettings() {
 
 function renderSettingsContent() {
   const content = document.getElementById('settingsContent');
+  const { githubToken, gistId } = state.cloudConfig || {};
+
   content.innerHTML = `
     <!-- Основная цель -->
     <div class="settings-group">
@@ -591,6 +793,33 @@ function renderSettingsContent() {
 
     <div class="divider"></div>
 
+    <!-- Облачная синхронизация GitHub -->
+    <div class="settings-group">
+      <div class="settings-group-title">☁️ Облачная синхронизация (GitHub Gist)</div>
+      <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 12px; line-height: 1.4;">
+        Безопасная синхронизация прогресса между устройствами. Все изменения также сохраняются локально для 100% оффлайн работы.
+      </p>
+      
+      <div class="settings-field">
+        <label for="settCloudToken">GitHub Personal Access Token (PAT)</label>
+        <input type="password" id="settCloudToken" value="${escapeHtml(githubToken || '')}" placeholder="ghp_xxxxxxxxxxxxxx">
+      </div>
+      <div class="settings-field">
+        <label for="settCloudGistId">Gist ID (создается автоматически)</label>
+        <input type="text" id="settCloudGistId" value="${escapeHtml(gistId || '')}" placeholder="Автоматически после создания">
+      </div>
+
+      <div class="cloud-status-box" id="cloudStatusBox" style="margin-top: 10px; padding: 10px; border-radius: 8px; font-size: 0.82rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle);">
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
+        <button class="btn-primary btn-sm" onclick="createCloudGist()" style="flex: 1; min-width: 140px;">✨ Создать облако</button>
+        <button class="btn-secondary btn-sm" onclick="syncToCloud()" style="flex: 1; min-width: 140px;">🔄 Синхронизировать</button>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
     <!-- Подзадачи -->
     <div class="settings-group">
       <div class="settings-group-title">Подзадачи</div>
@@ -611,6 +840,8 @@ function renderSettingsContent() {
       <button class="btn-danger btn-block" onclick="resetProgress()">Сбросить весь прогресс</button>
     </div>
   `;
+
+  renderCloudStatusBox();
 }
 
 function renderSettingsSubGoalsList() {
@@ -891,6 +1122,8 @@ function saveSettings() {
   const unit = document.getElementById('settGoalUnit').value.trim();
   const color = document.getElementById('settGoalColor').value;
   const startDate = document.getElementById('settGoalStart').value;
+  const cloudToken = document.getElementById('settCloudToken')?.value.trim() || '';
+  const cloudGistId = document.getElementById('settCloudGistId')?.value.trim() || '';
 
   if (!title) {
     showToast('Введите название цели', 'error');
@@ -905,6 +1138,10 @@ function saveSettings() {
   state.goalTarget = target;
   state.goalUnit = unit || 'очков';
   state.goalColor = color;
+
+  if (!state.cloudConfig) state.cloudConfig = {};
+  state.cloudConfig.githubToken = cloudToken;
+  state.cloudConfig.gistId = cloudGistId;
 
   if (startDate) {
     state.goalStartDate = startDate;
@@ -1182,6 +1419,21 @@ function initEventListeners() {
         closeLogsManagement();
       }
     }
+  });
+
+  // Network online/offline event listeners
+  window.addEventListener('online', () => {
+    console.log('[Network] 🟢 Подключение к интернету восстановлено');
+    showToast('Сеть восстановлена. Синхронизация...', 'success');
+    if (state.cloudConfig && state.cloudConfig.githubToken && state.cloudConfig.gistId) {
+      syncToCloud();
+    }
+  });
+
+  window.addEventListener('offline', () => {
+    console.log('[Network] 🔴 Интернет-соединение отсутствует. Включен оффлайн-режим.');
+    showToast('Оффлайн-режим: Все данные сохраняются локально.', 'error');
+    renderCloudStatusBox();
   });
 
   console.log('[Init] Обработчики событий инициализированы');
