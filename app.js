@@ -133,6 +133,16 @@ function getAuthHeader(token) {
   return `Bearer ${t}`;
 }
 
+// Удаляем чувствительные данные перед отправкой в Gist
+function getSanitizedState() {
+  const safeState = JSON.parse(JSON.stringify(state));
+  if (safeState.cloudConfig) {
+    // Удаляем токен, чтобы GitHub Secret Scanning не отзывал его
+    delete safeState.cloudConfig.githubToken;
+  }
+  return safeState;
+}
+
 async function syncToCloud() {
   const tokenInput = document.getElementById('settCloudToken')?.value.trim();
   const gistIdInput = document.getElementById('settCloudGistId')?.value.trim();
@@ -180,7 +190,7 @@ async function syncToCloud() {
       description: "Progress Tracker Backup Data",
       files: {
         "progress_tracker_state.json": {
-          content: JSON.stringify(state, null, 2)
+          content: JSON.stringify(getSanitizedState(), null, 2)
         }
       }
     };
@@ -273,7 +283,7 @@ async function createCloudGist() {
       public: false,
       files: {
         "progress_tracker_state.json": {
-          content: JSON.stringify(state, null, 2)
+          content: JSON.stringify(getSanitizedState(), null, 2)
         }
       }
     };
