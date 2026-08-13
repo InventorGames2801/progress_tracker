@@ -174,12 +174,17 @@ async function syncToCloud() {
     const foundId = await autoDiscoverGist(githubToken);
     if (foundId) {
       state.cloudConfig.gistId = foundId;
-      await loadFromCloud();
+      // Если локально нет цели, то безопасно загружаем из облака
+      if (!state.goalTarget) {
+        await loadFromCloud();
+      } else {
+        console.log('[Storage:Cloud] ⚠️ Локально есть данные, пропускаем загрузку из облака во избежание перезаписи.');
+      }
       saveState();
       renderSettingsContent();
       render();
       showToast('Успешно подключено к вашему облаку!', 'success');
-      return;
+      // Не делаем return, чтобы код ниже отправил (PATCH) текущие данные в найденный Gist!
     } else {
       showToast('Облако не найдено. Нажмите "Создать облако"', 'error');
       renderCloudStatusBox('Облако не найдено в аккаунте. Создайте новое кнопкой ниже.');
@@ -191,9 +196,6 @@ async function syncToCloud() {
   showToast('Синхронизация с GitHub...', 'success');
 
   try {
-    // Сначала пробуем загрузить свежие данные с облака
-    await loadFromCloud();
-
     const payload = {
       description: "Progress Tracker Backup Data",
       files: {
@@ -274,7 +276,9 @@ async function createCloudGist() {
     if (!state.cloudConfig) state.cloudConfig = {};
     state.cloudConfig.githubToken = token;
     state.cloudConfig.gistId = existingId;
-    await loadFromCloud();
+    if (!state.goalTarget) {
+      await loadFromCloud();
+    }
     saveState();
     renderSettingsContent();
     render();
