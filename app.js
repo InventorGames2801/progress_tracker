@@ -35,6 +35,7 @@ let state = getDefaultState();
 let pendingPointsData = null;
 let passwordCallback = null;
 let editingLogId = null;
+let _isSyncing = false;
 
 // ============ UTILITY FUNCTIONS ============
 function generateId() {
@@ -83,13 +84,13 @@ function formatNumber(num) {
 }
 
 // ============ LOCALSTORAGE & CLOUD SYNC ============
-function loadState() {
+async function loadState() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
       state = { ...getDefaultState(), ...parsed, cloudConfig: { ...getDefaultState().cloudConfig, ...(parsed.cloudConfig || {}) } };
-      console.log('[Storage:Local] Состояние загружено из localStorage:', state);
+      console.log('[Storage:Local] Состояние загружено из localStorage');
     } else {
       console.log('[Storage:Local] Сохранённого состояния в localStorage нет, используются значения по умолчанию');
     }
@@ -100,11 +101,17 @@ function loadState() {
 
   // Загружаем с GitHub при наличии сетевого соединения и настроенного облака
   if (state.cloudConfig && state.cloudConfig.githubToken && state.cloudConfig.gistId && navigator.onLine) {
-    loadFromCloud();
+    await loadFromCloud();
   }
 }
 
 function saveState() {
+  // Если офлайн и настроена синхронизация — выставляем pendingSync ДО сохранения
+  if (state.cloudConfig && state.cloudConfig.githubToken && state.cloudConfig.gistId && !navigator.onLine) {
+    state.cloudConfig.pendingSync = true;
+    console.warn('[Storage:Offline] Нет интернет-соединения. pendingSync=true, данные будут отправлены при появлении сети.');
+  }
+
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     console.log('[Storage:Local] Состояние сохранено в localStorage');
@@ -113,15 +120,30 @@ function saveState() {
     showToast('Ошибка сохранения локальных данных', 'error');
   }
 
-  // Если настроена синхронизация с GitHub Cloud
-  if (state.cloudConfig && state.cloudConfig.githubToken && state.cloudConfig.gistId) {
-    if (navigator.onLine) {
-      syncToCloud();
-    } else {
-      state.cloudConfig.pendingSync = true;
-      console.warn('[Storage:Offline] Нет интернет-соединения. Данные сохранены локально и будут отправлены при появлении сети.');
-    }
+  // Если настроена синхронизация с GitHub Cloud и онлайн — отправляем
+  if (state.cloudConfig && state.cloudConfig.githubToken && state.cloudConfig.gistId && navigator.onLine && !_isSyncing) {
+    syncToCloud();
   }
+}
+
+// ============ INTEGRITY CHECK ============
+function recalculateProgress() {
+  // Пересчитываем goalCurrent из логов (единственный источник правды)
+  const calculatedCurrent = state.logs.reduce((sum, log) => sum + log.points, 0);
+  if (state.goalCurrent !== calculatedCurrent) {
+    console.log(`[Integrity] Обновлен goalCurrent: ${state.goalCurrent} -> ${calculatedCurrent}`);
+    state.goalCurrent = calculatedCurrent;
+  }
+
+  // Пересчитываем баланс каждой подзадачи из привязанных логов
+  state.subGoals.forEach(sg => {
+    const sgLogs = state.logs.filter(l => l.subGoalId === sg.id);
+    const calculatedSgCurrent = sgLogs.reduce((sum, l) => sum + l.points, 0);
+    if ((sg.current || 0) !== calculatedSgCurrent) {
+      console.log(`[Integrity] Обновлена подзадача "${sg.title}": ${sg.current || 0} -> ${calculatedSgCurrent}`);
+      sg.current = calculatedSgCurrent;
+    }
+  });
 }
 
 // ============ GITHUB CLOUD SYNC (GIST API) ============
@@ -152,14 +174,12 @@ function getSanitizedState() {
 }
 
 async function syncToCloud() {
-  const tokenInput = document.getElementById('settCloudToken')?.value.trim();
-  const gistIdInput = document.getElementById('settCloudGistId')?.value.trim();
+  if (_isSyncing) return;
+  _isSyncing = true;
 
-  // Обновляем токен и Gist ID из полей ввода, если они переданы
+  try {
+
   if (!state.cloudConfig) state.cloudConfig = {};
-  if (tokenInput) state.cloudConfig.githubToken = tokenInput;
-  if (gistIdInput) state.cloudConfig.gistId = gistIdInput;
-
   const { githubToken, gistId } = state.cloudConfig;
 
   if (!githubToken) {
@@ -233,6 +253,10 @@ async function syncToCloud() {
     state.cloudConfig.pendingSync = true;
     renderCloudStatusBox('Ошибка сети. Данные сохранены локально.');
     showToast('Ошибка сети при синхронизации', 'error');
+  }
+
+  } finally {
+    _isSyncing = false;
   }
 }
 
@@ -352,12 +376,50 @@ async function loadFromCloud() {
       const file = data.files && data.files['progress_tracker_state.json'];
       if (file && file.content) {
         const remoteState = JSON.parse(file.content);
-        console.log('[Storage:Cloud] 📥 Получено удаленное состояние с GitHub:', remoteState);
+        console.log('[Storage:Cloud] 📥 Получено удаленное состояние с GitHub');
 
-        state = { ...getDefaultState(), ...remoteState, cloudConfig: { ...state.cloudConfig, lastSyncedAt: new Date().toISOString() } };
+        // Merge-стратегия: объединяем логи по уникальным ID вместо полной перезаписи
+        const localLogIds = new Set(state.logs.map(l => l.id));
+        const mergedLogs = [...state.logs];
+        if (remoteState.logs && Array.isArray(remoteState.logs)) {
+          for (const remoteLog of remoteState.logs) {
+            if (!localLogIds.has(remoteLog.id)) {
+              mergedLogs.push(remoteLog);
+            }
+          }
+        }
+        mergedLogs.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        // Merge подзадач по ID
+        const localSGIds = new Set(state.subGoals.map(sg => sg.id));
+        const mergedSubGoals = [...state.subGoals];
+        if (remoteState.subGoals && Array.isArray(remoteState.subGoals)) {
+          for (const remoteSG of remoteState.subGoals) {
+            if (!localSGIds.has(remoteSG.id)) {
+              mergedSubGoals.push(remoteSG);
+            }
+          }
+        }
+
+        // Настройки цели: предпочитаем облачные значения (актуальнее)
+        state = {
+          ...getDefaultState(),
+          goalTitle: remoteState.goalTitle || state.goalTitle,
+          goalTarget: remoteState.goalTarget || state.goalTarget,
+          goalUnit: remoteState.goalUnit || state.goalUnit || 'очков',
+          goalColor: remoteState.goalColor || state.goalColor || '#6366f1',
+          goalStartDate: remoteState.goalStartDate || state.goalStartDate,
+          subGoals: mergedSubGoals,
+          logs: mergedLogs,
+          goalCurrent: 0, // будет пересчитан ниже
+          cloudConfig: { ...state.cloudConfig, lastSyncedAt: new Date().toISOString() }
+        };
+
+        // Пересчитываем goalCurrent и subGoal.current из объединённых логов
+        recalculateProgress();
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
         render();
-        console.log('[Storage:Cloud] ✅ Данные успешно синхронизированы с GitHub!');
+        console.log(`[Storage:Cloud] ✅ Данные объединены с GitHub! Логов: ${mergedLogs.length}, Подзадач: ${mergedSubGoals.length}`);
       }
     } else {
       console.warn(`[Storage:Cloud] ⚠️ Не удалось загрузить облачные данные (Status ${response.status})`);
@@ -686,19 +748,10 @@ function confirmPoints() {
 
   const { points, subGoalId, description } = pendingPointsData;
 
-  // Добавляем в общий прогресс
-  state.goalCurrent += points;
-  console.log(`[Points] Добавлено ${points} очков в общий прогресс. Итого: ${state.goalCurrent}`);
-
-  // Добавляем очки в подзадачу ТОЛЬКО если она была выбрана пользователем
   let subGoalTitle = '';
   if (subGoalId) {
     const sg = state.subGoals.find(s => s.id === subGoalId);
-    if (sg) {
-      sg.current = (sg.current || 0) + points;
-      subGoalTitle = sg.title;
-      console.log(`[Points] Добавлено ${points} очков подзадаче "${sg.title}". Итого: ${sg.current}`);
-    }
+    if (sg) subGoalTitle = sg.title;
   }
 
   // Создаём лог
@@ -712,6 +765,9 @@ function confirmPoints() {
   };
   state.logs.push(logEntry);
   console.log(`[Logs] Создана запись: ${JSON.stringify(logEntry)}`);
+
+  // Пересчитываем балансы (SSOT)
+  recalculateProgress();
 
   // Сохраняем и обновляем
   saveState();
@@ -939,6 +995,21 @@ function renderSettingsContent() {
         ＋ Добавить подзадачу
       </button>
       <div id="subGoalFormContainer"></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Резервное копирование -->
+    <div class="settings-group">
+      <div class="settings-group-title">💾 Резервное копирование</div>
+      <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 12px; line-height: 1.4;">
+        Экспорт всех данных в JSON-файл для бэкапа или переноса на другое устройство. Импорт восстановит все данные из файла.
+      </p>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button class="btn-primary btn-sm" onclick="exportData()" style="flex: 1; min-width: 140px;">⬇️ Экспорт данных</button>
+        <button class="btn-secondary btn-sm" onclick="document.getElementById('importFileInput').click()" style="flex: 1; min-width: 140px;">⬆️ Импорт данных</button>
+      </div>
+      <input type="file" id="importFileInput" accept=".json" style="display:none" onchange="importData(event)">
     </div>
 
     <div class="divider"></div>
@@ -1176,6 +1247,10 @@ async function saveEditSubGoal(id) {
     showToast('Введите корректную цель подзадачи', 'error');
     return;
   }
+  if (target < current) {
+    showToast('Цель не может быть меньше текущего прогресса', 'error');
+    return;
+  }
 
   const newImage = await readImageFile(fileInput);
 
@@ -1215,6 +1290,16 @@ function deleteSubGoal(id) {
   if (!confirm(`Удалить подзадачу "${sg.title}"? Это действие нельзя отменить.`)) return;
 
   state.subGoals = state.subGoals.filter(s => s.id !== id);
+  
+  // Отвязываем логи удаленной подзадачи
+  state.logs.forEach(log => {
+    if (log.subGoalId === id) {
+      log.subGoalId = null;
+      log.subGoalTitle = '';
+    }
+  });
+
+  recalculateProgress();
   saveState();
 
   console.log(`[SubGoal] Удалена подзадача: "${sg.title}"`);
@@ -1272,12 +1357,88 @@ function resetProgress() {
 
   state.goalCurrent = 0;
   state.logs = [];
+  state.subGoals.forEach(sg => { sg.current = 0; });
   saveState();
   render();
 
   console.log('[Settings] Прогресс сброшен');
   showToast('Прогресс сброшен');
   renderSettingsContent();
+}
+
+// ============ EXPORT / IMPORT DATA ============
+function exportData() {
+  // Создаём копию состояния без чувствительных данных
+  const exportState = JSON.parse(JSON.stringify(state));
+  if (exportState.cloudConfig) {
+    delete exportState.cloudConfig.githubToken;
+  }
+
+  const blob = new Blob([JSON.stringify(exportState, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const date = new Date().toISOString().replace(/[T:]/g, '-').split('.')[0];
+  a.href = url;
+  a.download = `progress_tracker_backup_${date}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  console.log('[Export] Данные экспортированы в файл');
+  showToast('Данные экспортированы!');
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const imported = JSON.parse(e.target.result);
+
+      // Валидация структуры
+      if (typeof imported !== 'object' || imported === null || Array.isArray(imported)) {
+        showToast('Некорректный формат файла', 'error');
+        return;
+      }
+
+      if (!confirm(`Импортировать данные из "${file.name}"?\n\nТекущие данные будут заменены.`)) {
+        return;
+      }
+
+      // Сохраняем текущий GitHub токен (он не экспортируется)
+      const currentToken = state.cloudConfig ? state.cloudConfig.githubToken : '';
+
+      state = {
+        ...getDefaultState(),
+        ...imported,
+        cloudConfig: {
+          ...getDefaultState().cloudConfig,
+          ...(imported.cloudConfig || {}),
+          githubToken: currentToken
+        }
+      };
+
+      // Пересчитываем балансы из логов
+      recalculateProgress();
+      saveState();
+      render();
+      renderSettingsContent();
+
+      const logCount = state.logs ? state.logs.length : 0;
+      const sgCount = state.subGoals ? state.subGoals.length : 0;
+      console.log(`[Import] Данные импортированы: ${logCount} логов, ${sgCount} подзадач`);
+      showToast(`Импортировано: ${logCount} записей, ${sgCount} подзадач`);
+    } catch (err) {
+      console.error('[Import] Ошибка импорта:', err);
+      showToast('Ошибка чтения файла: некорректный JSON', 'error');
+    }
+  };
+
+  reader.readAsText(file);
+  event.target.value = ''; // Сброс input для повторного импорта того же файла
 }
 
 // ============ LOGS MANAGEMENT DRAWER ============
@@ -1406,31 +1567,13 @@ function saveEditLog(id) {
     return;
   }
 
-  const pointsDiff = newPoints - log.points;
-
-  // Обновляем главный прогресс
-  state.goalCurrent += pointsDiff;
-  console.log(`[Logs] Разница очков: ${pointsDiff}. Новый общий прогресс: ${state.goalCurrent}`);
-
-  // Обновляем старую подзадачу (вычитаем очки старого лога)
-  if (log.subGoalId) {
-    const oldSG = state.subGoals.find(sg => sg.id === log.subGoalId);
-    if (oldSG) {
-      oldSG.current = Math.max(0, (oldSG.current || 0) - log.points);
-    }
-  }
-
-  // Обновляем новую подзадачу (добавляем очки нового лога)
-  if (newSubGoalId) {
-    const newSG = state.subGoals.find(sg => sg.id === newSubGoalId);
-    if (newSG) {
-      newSG.current = (newSG.current || 0) + newPoints;
-    }
-  }
   log.points = newPoints;
   log.description = newDesc;
   log.subGoalId = newSubGoalId;
   log.subGoalTitle = newSubGoalId ? (state.subGoals.find(sg => sg.id === newSubGoalId)?.title || '') : '';
+
+  // Пересчитываем балансы (SSOT)
+  recalculateProgress();
 
   editingLogId = null;
   saveState();
@@ -1447,21 +1590,12 @@ function deleteLog(id) {
 
   if (!confirm(`Удалить запись? Будет вычтено ${log.points} очков из прогресса.`)) return;
 
-  // Вычитаем из общего прогресса
-  state.goalCurrent -= log.points;
-  state.goalCurrent = Math.max(0, state.goalCurrent);
-  console.log(`[Logs] Удаление лога: вычтено ${log.points} из общего прогресса. Итого: ${state.goalCurrent}`);
-
-  // Если лог был привязан к подзадаче, вычитаем из неё очки
-  if (log.subGoalId) {
-    const sg = state.subGoals.find(s => s.id === log.subGoalId);
-    if (sg) {
-      sg.current = Math.max(0, (sg.current || 0) - log.points);
-    }
-  }
-
   // Удаляем лог
   state.logs = state.logs.filter(l => l.id !== id);
+  
+  // Пересчитываем балансы (SSOT)
+  recalculateProgress();
+
   saveState();
   render();
   renderLogsManagement(document.getElementById('logsSearchInput')?.value || '');
@@ -1549,13 +1683,14 @@ function initEventListeners() {
 }
 
 // ============ INITIALIZATION ============
-function init() {
+async function init() {
   console.log('[Init] =============================');
   console.log('[Init] Трекер Прогресса — запуск');
   console.log('[Init] =============================');
 
-  loadState();
   initEventListeners();
+  await loadState();
+  recalculateProgress();
   render();
 
   console.log('[Init] Приложение готово к работе');
