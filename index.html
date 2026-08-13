@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Трекер Прогресса</title>
+  <meta name="description" content="Профессиональный трекер прогресса с подзадачами, логированием и аналитикой">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ===== Fixed Action Buttons ===== -->
+  <div class="action-buttons">
+    <button class="action-btn" id="logsManageBtn" title="Управление логами">📋</button>
+    <button class="action-btn" id="settingsBtn" title="Настройки">⚙️</button>
+  </div>
+
+  <!-- ===== Toast Container ===== -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- ===== Main Content ===== -->
+  <main class="container" id="mainContainer">
+    <!-- Welcome State (shown when no goal is set) -->
+    <div id="welcomeState" class="welcome-state hidden">
+      <div class="welcome-icon">🚀</div>
+      <h2 class="welcome-title">Добро пожаловать!</h2>
+      <p class="welcome-text">Нажмите на кнопку настроек ⚙️ чтобы установить вашу цель и начать отслеживать прогресс.</p>
+    </div>
+
+    <!-- Goal Content (shown when goal is configured) -->
+    <div id="goalContent" class="hidden">
+      <!-- Goal Title -->
+      <h1 class="goal-title" id="goalTitleDisplay">Моя цель</h1>
+
+      <!-- Remaining Text -->
+      <p class="remaining-text" id="remainingText">До цели осталось <span class="highlight" id="remainingValue">0</span> <span id="remainingUnit">очков</span></p>
+
+      <!-- Main Progress Bar -->
+      <section class="progress-section">
+        <div class="progress-container">
+          <div class="progress-bar-wrapper">
+            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+          </div>
+          <div class="progress-glow" id="progressGlow" style="width: 0%"></div>
+          <div class="particles-container" id="particlesContainer"></div>
+        </div>
+        <div class="progress-percent" id="progressPercent">0%</div>
+
+        <!-- Stats Row -->
+        <div class="stats-row" id="statsRow">
+          <div class="stat-card">
+            <div class="stat-label">Текущий</div>
+            <div class="stat-value accent" id="statCurrent">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Цель</div>
+            <div class="stat-value" id="statTarget">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Осталось</div>
+            <div class="stat-value" id="statRemaining">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Дней</div>
+            <div class="stat-value" id="statDays">0</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Add Points Section -->
+      <section class="add-points-section">
+        <button class="add-points-btn" id="addPointsToggle">
+          <span class="icon">＋</span> Добавить прогресс
+        </button>
+
+        <div class="add-points-panel hidden" id="addPointsPanel">
+          <div class="panel-field">
+            <label for="pointsInput">Количество очков</label>
+            <input type="number" id="pointsInput" min="1" step="1" placeholder="Введите количество">
+          </div>
+          <div class="panel-field">
+            <label for="subGoalSelect">Подзадача</label>
+            <select id="subGoalSelect">
+              <option value="">Без подзадачи</option>
+            </select>
+          </div>
+          <div class="panel-field">
+            <label for="actionDescription">Описание действия</label>
+            <textarea id="actionDescription" rows="3" placeholder="Опишите выполненное действие..."></textarea>
+          </div>
+          <button class="submit-btn" id="submitPointsBtn">Принять</button>
+        </div>
+      </section>
+
+      <!-- Sub-goals Section -->
+      <section class="subgoals-section" id="subGoalsSection">
+        <h2 class="section-title">Подзадачи</h2>
+        <div class="subgoals-grid" id="subGoalsGrid">
+          <!-- Dynamically filled -->
+        </div>
+      </section>
+
+      <!-- Completed Sub-goals Section -->
+      <section class="subgoals-section hidden" id="completedSubGoalsSection">
+        <h2 class="section-title completed-title">🏅 Выполненные подзадачи</h2>
+        <div class="subgoals-grid" id="completedSubGoalsGrid">
+          <!-- Dynamically filled -->
+        </div>
+      </section>
+
+      <!-- Recent Logs Section -->
+      <section class="recent-logs-section">
+        <h2 class="section-title">Последние действия</h2>
+        <div class="recent-logs-list" id="recentLogsList">
+          <!-- Dynamically filled -->
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ===== Password Modal ===== -->
+  <div class="modal-overlay hidden" id="passwordModal">
+    <div class="modal">
+      <h3 id="passwordModalTitle">Введите пароль</h3>
+      <input type="password" id="passwordInput" placeholder="Пароль" autocomplete="off">
+      <div class="modal-actions">
+        <button class="btn-primary" id="passwordSubmitBtn">Войти</button>
+        <button class="btn-secondary" id="passwordCancelBtn">Отмена</button>
+      </div>
+      <p class="error-text hidden" id="passwordError">Неверный пароль</p>
+    </div>
+  </div>
+
+  <!-- ===== Confirmation Modal ===== -->
+  <div class="modal-overlay hidden" id="confirmModal">
+    <div class="modal">
+      <h3>Подтверждение</h3>
+      <p>Вы подтверждаете что действие выполнено легально?</p>
+      <div class="modal-actions">
+        <button class="btn-primary" id="confirmYesBtn">Подтвердить</button>
+        <button class="btn-secondary" id="confirmNoBtn">Отклонить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Settings Drawer ===== -->
+  <div class="drawer-overlay hidden" id="settingsOverlay">
+    <div class="drawer" id="settingsDrawer">
+      <div class="drawer-header">
+        <h2>⚙️ Настройки</h2>
+        <button class="close-btn" id="settingsCloseBtn">&times;</button>
+      </div>
+      <div class="drawer-content" id="settingsContent">
+        <!-- Dynamically filled by JS -->
+      </div>
+      <div class="drawer-footer">
+        <button class="btn-primary" id="settingsSaveBtn">Сохранить настройки</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Logs Management Drawer ===== -->
+  <div class="drawer-overlay hidden" id="logsOverlay">
+    <div class="drawer" id="logsDrawer">
+      <div class="drawer-header">
+        <h2>📋 Управление логами</h2>
+        <button class="close-btn" id="logsCloseBtn">&times;</button>
+      </div>
+      <div class="drawer-content" id="logsContent">
+        <!-- Dynamically filled by JS -->
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
