@@ -751,22 +751,41 @@ input[type="file"] {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
-/* При наведении на сетку: остальные карточки остаются светлыми с лёгким приглушением */
+/* При наведении на одну карточку: остальные становятся белыми */
 .subgoals-grid:has(.subgoal-card:hover) .subgoal-card:not(:hover) {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.1);
-  opacity: 0.6;
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  opacity: 0.88;
   transform: scale(0.98);
 }
 
-/* Наведённая карточка становится тёмной, контрастной, с подсветкой */
+.subgoals-grid:has(.subgoal-card:hover) .subgoal-card:not(:hover) .subgoal-card-title,
+.subgoals-grid:has(.subgoal-card:hover) .subgoal-card:not(:hover) .subgoal-stat,
+.subgoals-grid:has(.subgoal-card:hover) .subgoal-card:not(:hover) .subgoal-stat-value,
+.subgoals-grid:has(.subgoal-card:hover) .subgoal-card:not(:hover) .progress-text,
+.subgoals-grid:has(.subgoal-card:hover) .subgoal-card:not(:hover) .subgoal-description {
+  color: #0f0f1e !important;
+}
+
+.subgoals-grid:has(.subgoal-card:hover) .subgoal-card:not(:hover) .bg-circle {
+  stroke: rgba(0, 0, 0, 0.12) !important;
+}
+
+/* Наведённая карточка становится абсолютно ЧЁРНОЙ */
 .subgoal-card:hover {
-  background: #090a18;
-  border-color: var(--accent-1);
+  background: #000000 !important;
+  color: #ffffff !important;
+  border-color: var(--accent-1) !important;
   transform: translateY(-4px) scale(1.02);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.75), 0 0 25px rgba(99, 102, 241, 0.35);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.95), 0 0 25px rgba(99, 102, 241, 0.4) !important;
   opacity: 1 !important;
   z-index: 2;
+}
+
+.subgoal-card:hover .subgoal-card-title,
+.subgoal-card:hover .subgoal-stat-value,
+.subgoal-card:hover .progress-text {
+  color: #ffffff !important;
 }
 
 .subgoal-card-image {
@@ -1185,31 +1204,82 @@ input[type="file"] {
   margin-bottom: 6px;
 }
 
-/* --- Subgoal list in settings --- */
+/* --- Subgoal list in settings drawer (выдвижной список подзадач) --- */
 .settings-subgoal-item {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #ffffff;
+  color: #0f0f1e;
+  border: 1px solid #e2e8f0;
   border-radius: var(--radius-md);
   margin-bottom: 8px;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
+.settings-subgoal-item .settings-subgoal-name {
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #0f0f1e;
+  transition: color 0.2s ease;
+}
+
+.settings-subgoal-item .icon-btn {
+  border-color: rgba(0, 0, 0, 0.15);
+  color: #334155;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.settings-subgoal-item .icon-btn:hover {
+  background: rgba(0, 0, 0, 0.12);
+  color: #000000;
+}
+
+/* Когда один элемент наведён, остальные остаются / становятся чисто БЕЛЫМИ */
 #settingsSubGoalsList:has(.settings-subgoal-item:hover) .settings-subgoal-item:not(:hover) {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.08);
-  opacity: 0.6;
+  background: #ffffff !important;
+  color: #0f0f1e !important;
+  border-color: #cbd5e1 !important;
+  opacity: 0.85;
+  transform: scale(0.98);
 }
 
+#settingsSubGoalsList:has(.settings-subgoal-item:hover) .settings-subgoal-item:not(:hover) .settings-subgoal-name {
+  color: #0f0f1e !important;
+}
+
+#settingsSubGoalsList:has(.settings-subgoal-item:hover) .settings-subgoal-item:not(:hover) .icon-btn {
+  color: #475569 !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+}
+
+/* Наведённый элемент становится полностью ЧЁРНЫМ, текст и иконки — белыми */
 .settings-subgoal-item:hover {
-  background: #090a18;
-  border-color: var(--accent-1);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), 0 0 15px rgba(99, 102, 241, 0.25);
-  transform: translateY(-1px);
+  background: #000000 !important;
+  color: #ffffff !important;
+  border-color: var(--accent-1) !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.9), 0 0 16px rgba(99, 102, 241, 0.4) !important;
+  transform: translateY(-2px) scale(1.01);
   opacity: 1 !important;
+  z-index: 2;
+}
+
+.settings-subgoal-item:hover .settings-subgoal-name {
+  color: #ffffff !important;
+}
+
+.settings-subgoal-item:hover .icon-btn {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: #e2e8f0 !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.settings-subgoal-item:hover .icon-btn:hover {
+  background: rgba(255, 255, 255, 0.25) !important;
+  color: #ffffff !important;
 }
 
 .settings-subgoal-name {
