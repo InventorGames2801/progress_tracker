@@ -22,6 +22,7 @@ function getDefaultState() {
     logs: [],
     deletedSubGoalIds: [],
     deletedLogIds: [],
+    settingsUpdatedAt: null,
     cloudConfig: {
       githubToken: '',
       gistId: '',
@@ -396,42 +397,64 @@ async function loadFromCloud() {
         const mergedDeletedLogIds = Array.from(new Set([...(state.deletedLogIds || []), ...remoteDeletedLogIds]));
         const mergedDeletedSubGoalIds = Array.from(new Set([...(state.deletedSubGoalIds || []), ...remoteDeletedSubGoalIds]));
 
-        const localLogIds = new Set(state.logs.map(l => l.id));
-        let mergedLogs = [...state.logs];
-        if (remoteState.logs && Array.isArray(remoteState.logs)) {
-          for (const remoteLog of remoteState.logs) {
-            if (!localLogIds.has(remoteLog.id)) {
-              mergedLogs.push(remoteLog);
-            }
+        // LWW (Last-Write-Wins) Merge для логов
+        const localLogsMap = new Map(state.logs.map(l => [l.id, l]));
+        const remoteLogsMap = new Map((remoteState.logs || []).map(l => [l.id, l]));
+        const allLogIds = new Set([...localLogsMap.keys(), ...remoteLogsMap.keys()]);
+        
+        let mergedLogs = [];
+        for (const id of allLogIds) {
+          const localLog = localLogsMap.get(id);
+          const remoteLog = remoteLogsMap.get(id);
+          
+          if (localLog && remoteLog) {
+            const localTime = new Date(localLog.updatedAt || localLog.date).getTime();
+            const remoteTime = new Date(remoteLog.updatedAt || remoteLog.date).getTime();
+            mergedLogs.push(localTime >= remoteTime ? localLog : remoteLog);
+          } else {
+            mergedLogs.push(localLog || remoteLog);
           }
         }
         
-        // Отфильтровываем все логи, которые были удалены хотя бы на одном устройстве
+        // Отфильтровываем логи, удаленные на любом из устройств
         mergedLogs = mergedLogs.filter(log => !mergedDeletedLogIds.includes(log.id));
         mergedLogs.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-        // Merge подзадач по ID
-        const localSGIds = new Set(state.subGoals.map(sg => sg.id));
-        let mergedSubGoals = [...state.subGoals];
-        if (remoteState.subGoals && Array.isArray(remoteState.subGoals)) {
-          for (const remoteSG of remoteState.subGoals) {
-            if (!localSGIds.has(remoteSG.id)) {
-              mergedSubGoals.push(remoteSG);
-            }
+        // LWW Merge для подзадач
+        const localSGMap = new Map(state.subGoals.map(sg => [sg.id, sg]));
+        const remoteSGMap = new Map((remoteState.subGoals || []).map(sg => [sg.id, sg]));
+        const allSGIds = new Set([...localSGMap.keys(), ...remoteSGMap.keys()]);
+        
+        let mergedSubGoals = [];
+        for (const id of allSGIds) {
+          const localSG = localSGMap.get(id);
+          const remoteSG = remoteSGMap.get(id);
+          
+          if (localSG && remoteSG) {
+            const localTime = new Date(localSG.updatedAt || localSG.createdAt || 0).getTime();
+            const remoteTime = new Date(remoteSG.updatedAt || remoteSG.createdAt || 0).getTime();
+            mergedSubGoals.push(localTime >= remoteTime ? localSG : remoteSG);
+          } else {
+            mergedSubGoals.push(localSG || remoteSG);
           }
         }
         
-        // Отфильтровываем все подзадачи, которые были удалены хотя бы на одном устройстве
+        // Отфильтровываем подзадачи, удаленные на любом из устройств
         mergedSubGoals = mergedSubGoals.filter(sg => !mergedDeletedSubGoalIds.includes(sg.id));
 
-        // Настройки цели: предпочитаем облачные значения (актуальнее)
+        // LWW Merge для общих настроек цели
+        const localSettingsTime = new Date(state.settingsUpdatedAt || 0).getTime();
+        const remoteSettingsTime = new Date(remoteState.settingsUpdatedAt || 0).getTime();
+        const preferRemoteSettings = remoteSettingsTime > localSettingsTime;
+
         state = {
           ...getDefaultState(),
-          goalTitle: remoteState.goalTitle || state.goalTitle,
-          goalTarget: remoteState.goalTarget || state.goalTarget,
-          goalUnit: remoteState.goalUnit || state.goalUnit || 'очков',
-          goalColor: remoteState.goalColor || state.goalColor || '#6366f1',
-          goalStartDate: remoteState.goalStartDate || state.goalStartDate,
+          goalTitle: preferRemoteSettings ? (remoteState.goalTitle || state.goalTitle) : state.goalTitle,
+          goalTarget: preferRemoteSettings ? (remoteState.goalTarget || state.goalTarget) : state.goalTarget,
+          goalUnit: preferRemoteSettings ? (remoteState.goalUnit || state.goalUnit || 'очков') : (state.goalUnit || 'очков'),
+          goalColor: preferRemoteSettings ? (remoteState.goalColor || state.goalColor || '#6366f1') : (state.goalColor || '#6366f1'),
+          goalStartDate: preferRemoteSettings ? (remoteState.goalStartDate || state.goalStartDate) : state.goalStartDate,
+          settingsUpdatedAt: preferRemoteSettings ? remoteState.settingsUpdatedAt : state.settingsUpdatedAt,
           subGoals: mergedSubGoals,
           logs: mergedLogs,
           deletedSubGoalIds: mergedDeletedSubGoalIds,
@@ -783,6 +806,7 @@ function confirmPoints() {
   const logEntry = {
     id: generateId(),
     date: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     points,
     subGoalId,
     subGoalTitle,
@@ -1229,7 +1253,8 @@ async function saveNewSubGoal() {
     description: desc,
     reward: reward,
     image,
-    createdAt: new Date().toISOString().split('T')[0]
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   };
 
   state.subGoals.push(newSG);
@@ -1285,6 +1310,7 @@ async function saveEditSubGoal(id) {
   sg.color = color;
   sg.description = desc;
   sg.reward = reward;
+  sg.updatedAt = new Date().toISOString();
   if (dateEl && dateEl.value) sg.createdAt = dateEl.value;
   if (newImage) sg.image = newImage;
 
@@ -1301,6 +1327,7 @@ function removeSubGoalImage(id) {
   const sg = state.subGoals.find(s => s.id === id);
   if (sg) {
     sg.image = null;
+    sg.updatedAt = new Date().toISOString();
     saveState();
     showEditSubGoalForm(sg);
     render();
@@ -1369,6 +1396,8 @@ function saveSettings() {
   } else if (!state.goalStartDate) {
     state.goalStartDate = new Date().toISOString().split('T')[0];
   }
+  
+  state.settingsUpdatedAt = new Date().toISOString();
 
   saveState();
   render();
@@ -1601,6 +1630,7 @@ function saveEditLog(id) {
   log.description = newDesc;
   log.subGoalId = newSubGoalId;
   log.subGoalTitle = newSubGoalId ? (state.subGoals.find(sg => sg.id === newSubGoalId)?.title || '') : '';
+  log.updatedAt = new Date().toISOString();
 
   // Пересчитываем балансы (SSOT)
   recalculateProgress();
