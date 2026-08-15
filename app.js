@@ -593,11 +593,34 @@ function renderMainProgress() {
   // Процент
   document.getElementById('progressPercent').textContent = percent.toFixed(1) + '%';
 
+  // Вычисление дополнительных статистик
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  const todayStr = today.toISOString().split('T')[0];
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+  let pointsToday = 0;
+  let pointsYesterday = 0;
+
+  state.logs.forEach(log => {
+    const logDate = log.date.split('T')[0];
+    if (logDate === todayStr) pointsToday += log.points;
+    if (logDate === yesterdayStr) pointsYesterday += log.points;
+  });
+
+  const avgPerDay = days > 0 ? Math.round(goalCurrent / days) : goalCurrent;
+
   // Статистика
   document.getElementById('statCurrent').textContent = formatNumber(goalCurrent);
   document.getElementById('statTarget').textContent = formatNumber(goalTarget);
   document.getElementById('statRemaining').textContent = formatNumber(remaining);
+  document.getElementById('statPercentText').textContent = percent.toFixed(1) + '%';
   document.getElementById('statDays').textContent = days;
+  document.getElementById('statAvg').textContent = formatNumber(avgPerDay);
+  document.getElementById('statToday').textContent = formatNumber(pointsToday);
+  document.getElementById('statYesterday').textContent = formatNumber(pointsYesterday);
 
   console.log(`[Progress] ${goalCurrent}/${goalTarget} (${percent.toFixed(1)}%), осталось ${remaining} ${goalUnit}`);
 }
