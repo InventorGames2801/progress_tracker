@@ -39,6 +39,8 @@ let pendingPointsData = null;
 let passwordCallback = null;
 let editingLogId = null;
 let _isSyncing = false;
+let progressChartInstance = null;
+let currentChartPeriod = 'week';
 
 // ============ UTILITY FUNCTIONS ============
 function generateId() {
@@ -555,6 +557,11 @@ function render() {
     welcomeState.classList.remove('hidden');
     goalContent.classList.add('hidden');
   }
+
+  // Рендерим график после обновления DOM
+  if (isConfigured && typeof Chart !== 'undefined') {
+    renderChart();
+  }
 }
 
 // ============ MAIN PROGRESS BAR ============
@@ -621,6 +628,20 @@ function renderMainProgress() {
   document.getElementById('statAvg').textContent = formatNumber(avgPerDay);
   document.getElementById('statToday').textContent = formatNumber(pointsToday);
   document.getElementById('statYesterday').textContent = formatNumber(pointsYesterday);
+
+  // Тренд "За сегодня"
+  const trendEl = document.getElementById('statTrend');
+  const diff = pointsToday - pointsYesterday;
+  if (diff > 0) {
+    trendEl.textContent = `↑ +${formatNumber(diff)}`;
+    trendEl.className = 'stat-trend trend-up';
+  } else if (diff < 0) {
+    trendEl.textContent = `↓ ${formatNumber(diff)}`;
+    trendEl.className = 'stat-trend trend-down';
+  } else {
+    trendEl.textContent = `—`;
+    trendEl.className = 'stat-trend trend-neutral';
+  }
 
   console.log(`[Progress] ${goalCurrent}/${goalTarget} (${percent.toFixed(1)}%), осталось ${remaining} ${goalUnit}`);
 }
@@ -1733,6 +1754,16 @@ function initEventListeners() {
     if (e.key === 'Enter') submitPoints();
   });
 
+  // Chart tabs
+  document.querySelectorAll('.chart-tab').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      document.querySelectorAll('.chart-tab').forEach(b => b.classList.remove('active'));
+      e.target.classList.add('active');
+      currentChartPeriod = e.target.dataset.period;
+      renderChart();
+    });
+  });
+
   // Escape key closes modals/drawers
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -1764,6 +1795,107 @@ function initEventListeners() {
   });
 
   console.log('[Init] Обработчики событий инициализированы');
+}
+
+// ============ CHART RENDERING ============
+function renderChart() {
+  const canvas = document.getElementById('progressChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  
+  const dataPoints = new Map();
+  const now = new Date();
+  
+  let daysToLookBack = 7;
+  if (currentChartPeriod === 'month') daysToLookBack = 30;
+  if (currentChartPeriod === 'all') daysToLookBack = 3650;
+  
+  const startDate = new Date();
+  startDate.setDate(now.getDate() - daysToLookBack + 1);
+  startDate.setHours(0,0,0,0);
+  
+  if (currentChartPeriod !== 'all') {
+    for (let d = new Date(startDate); d <= now; d.setDate(d.getDate() + 1)) {
+      dataPoints.set(d.toISOString().split('T')[0], 0);
+    }
+  }
+
+  state.logs.forEach(log => {
+    const logTime = new Date(log.date).getTime();
+    if (logTime >= startDate.getTime() || currentChartPeriod === 'all') {
+      const day = log.date.split('T')[0];
+      if (!dataPoints.has(day)) dataPoints.set(day, 0);
+      dataPoints.set(day, dataPoints.get(day) + log.points);
+    }
+  });
+
+  const sortedDays = Array.from(dataPoints.keys()).sort();
+  const labels = sortedDays.map(dateStr => {
+    const d = new Date(dateStr);
+    return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth()+1).toString().padStart(2, '0')}`;
+  });
+  const data = sortedDays.map(d => dataPoints.get(d));
+
+  if (progressChartInstance) {
+    progressChartInstance.destroy();
+  }
+
+  const color = state.goalColor || '#6366f1';
+  
+  progressChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Очки',
+        data: data,
+        borderColor: color,
+        backgroundColor: (context) => {
+          if (!context.chart.chartArea) return;
+          const { ctx, chartArea: { top, bottom } } = context.chart;
+          const gradient = ctx.createLinearGradient(0, top, 0, bottom);
+          gradient.addColorStop(0, color + '80');
+          gradient.addColorStop(1, color + '00');
+          return gradient;
+        },
+        borderWidth: 3,
+        pointBackgroundColor: color,
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        fill: true,
+        tension: 0.4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          titleFont: { family: 'Inter', size: 13 },
+          bodyFont: { family: 'JetBrains Mono', size: 14, weight: 'bold' },
+          padding: 12,
+          cornerRadius: 8,
+          displayColors: false
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: 'rgba(255,255,255,0.5)', font: { family: 'JetBrains Mono' } }
+        },
+        x: {
+          grid: { display: false },
+          ticks: { color: 'rgba(255,255,255,0.5)', maxTicksLimit: 10, font: { family: 'Inter' } }
+        }
+      },
+      interaction: { intersect: false, mode: 'index' }
+    }
+  });
 }
 
 // ============ INITIALIZATION ============

@@ -11,7 +11,8 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=1.5">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body>
@@ -83,12 +84,30 @@
           </div>
           <div class="stat-card">
             <div class="stat-label">За сегодня</div>
-            <div class="stat-value" id="statToday">0</div>
+            <div class="stat-value-container">
+              <span class="stat-value" id="statToday">0</span>
+              <span class="stat-trend" id="statTrend"></span>
+            </div>
           </div>
           <div class="stat-card">
             <div class="stat-label">За вчера</div>
             <div class="stat-value" id="statYesterday">0</div>
           </div>
+        </div>
+      </section>
+
+      <!-- Chart Section -->
+      <section class="chart-section" id="chartSection">
+        <div class="chart-header">
+          <h3>Динамика прогресса</h3>
+          <div class="chart-tabs">
+            <button class="chart-tab active" data-period="week">Неделя</button>
+            <button class="chart-tab" data-period="month">Месяц</button>
+            <button class="chart-tab" data-period="all">Всё время</button>
+          </div>
+        </div>
+        <div class="chart-container">
+          <canvas id="progressChart"></canvas>
         </div>
       </section>
 
@@ -197,7 +216,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.5"></script>
+  <script src="app.js?v=1.6"></script>
 </body>
 
 </html>
